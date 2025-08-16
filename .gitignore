@@ -1,0 +1,4 @@
+*.o
+noodling
+build/
+compile_commands.json
