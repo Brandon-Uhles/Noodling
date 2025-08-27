@@ -1,100 +1,81 @@
-# Makefile for cross-platform C Development
-# Theoretically should build the project for both native linux and windows using clang and mingw-w64
-#
-# Directory layout:
-# src/        -> source files
-# include/    -> headers
-# build/      -> per-platform object files
-# bin/        -> Linux output
-# /mnt/p/../bin/ -> Windows binary output on the windows host drive, will need to be hardcoded on a different device
-#
-# Usage:
-# make -j     -> makes both
-# make linux  -> builds linux
-# make windows-> builds windows
-# make clean  -> cleans Directory
+# Cross-platform Makefile for C projects
+# Works on Linux/WSL and native Windows PowerShell
+# Windows Clang emits PDB debug info for VS
 
-
-
-
-# tells make these aren't real files (just in case I name things poorly)
-.PHONY: clean all linux windows
-
-
-
+.PHONY: all clean linux windows
 
 #-------------------------------------------------------------
-#COMPILER CONFIG
+# DETECT PLATFORM
 #-------------------------------------------------------------
+ifeq ($(OS),Windows_NT)
+    IS_WINDOWS = 1
+else
+    IS_WINDOWS = 0
+endif
 
-#Linux build uses clang
-CC = clang
-# enables warnings, extra warnings, check for headers in include, and include debug symbols, in that order
-CFLAGS = -Wall -Wextra -Iinclude -g
-TARGET_LINUX = bin/noodling
+#-------------------------------------------------------------
+# COMPILER AND FLAGS
+#-------------------------------------------------------------
+ifeq ($(IS_WINDOWS),1)
+    CC = clang
+    # Debug info for Visual Studio
+    CFLAGS = -Wall -Wextra -Iinclude -gcodeview -fmsc-version=1933
+    LDFLAGS = -mwindows -luser32 -lgdi32 -gcodeview -Xlinker /DEBUG
+    OBJDIR = build/windows
+    OUTDIR = bin/windows
+    EXE_EXT = .exe
+else
+    CC = clang
+    CFLAGS = -Wall -Wextra -Iinclude -g
+    LDFLAGS =
+    OBJDIR = build/linux
+    OUTDIR = bin/linux
+    EXE_EXT =
+endif
 
-# Windows-specific config using MingGW-w64
-WIN_CC = x86_64-w64-mingw32-gcc
-WIN_CFLAGS = -Wall -Wextra -Iinclude -g
-# build a GUI subsystem binary (aka no console)
-WIN_LDFLAGS = -mwindows
-WINDOWS_OUTDIR = /mnt/p/Development/CProjects/Noodling/bin/
-TARGET_WINDOWS = $(WINDOWS_OUTDIR)/noodling.exe
-
-#------------------------------------------------------------ 
-#SOURCE AND OBJ FILES
-#------------------------------------------------------------
-
-# source files, all c files in src/
+#-------------------------------------------------------------
+# SOURCE AND OBJECT FILES
+#-------------------------------------------------------------
 SRCS = $(wildcard src/*.c)
+OBJS = $(SRCS:src/%.c=$(OBJDIR)/%.o)
 
-#platform-specific object directories
-LINUX_OBJDIR = build/linux
-WIN_OBJDIR = build/windows
+#-------------------------------------------------------------
+# TARGET
+#-------------------------------------------------------------
+TARGET = $(OUTDIR)/noodling$(EXE_EXT)
 
+#-------------------------------------------------------------
+# RULES
+#-------------------------------------------------------------
+all: $(TARGET)
 
-# object files, simply converts all .c filenames into .o filenames
-OBJS = $(SRCS:src/%.c=$(LINUX_OBJDIR)/%.o)
+$(TARGET): $(OBJS) | $(OBJDIR) $(OUTDIR)
+	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
-# Windows object files
-WIN_OBJS = $(SRCS:src/%.c=$(WIN_OBJDIR)/%.o)
-
-all: linux windows
-
-linux: $(TARGET_LINUX)
-
-$(TARGET_LINUX): $(OBJS) | bin
-	$(CC) $(CFLAGS) $^ -o $@
-
-$(LINUX_OBJDIR)/%.o: src/%.c | $(LINUX_OBJDIR)
+$(OBJDIR)/%.o: src/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(LINUX_OBJDIR):
-	mkdir -p $(LINUX_OBJDIR)
+# PowerShell-compatible directory creation
+$(OBJDIR):
+ifeq ($(IS_WINDOWS),1)
+	PowerShell -Command "New-Item -ItemType Directory -Force -Path '$(OBJDIR)' | Out-Null"
+else
+	mkdir -p $(OBJDIR)
+endif
 
+$(OUTDIR):
+ifeq ($(IS_WINDOWS),1)
+	PowerShell -Command "New-Item -ItemType Directory -Force -Path '$(OUTDIR)' | Out-Null"
+else
+	mkdir -p $(OUTDIR)
+endif
 
-# windows build
-
-windows: $(TARGET_WINDOWS)
-
-$(TARGET_WINDOWS): $(WIN_OBJS) | $(WIN_OBJDIR) $(WINDOWS_OUTDIR)
-	$(WIN_CC) $(WIN_CFLAGS) $^ -o $@ $(WIN_LDFLAGS)
-
-$(WIN_OBJDIR)/%.o: src/%.c | $(WIN_OBJDIR)
-	$(WIN_CC) $(WIN_CFLAGS) -c $< -o $@
-
-$(WIN_OBJDIR): 
-	mkdir -p $(WIN_OBJDIR)
-
-$(WINDOWS_OUTDIR):
-	mkdir -p $(WINDOWS_OUTDIR)
-clean: 
-	rm -rf build $(TARGET_LINUX) $(TARGET_WINDOWS)
-
-bin:
-	mkdir -p bin
-
-# to build the target, check if all object files exist. If it does not exist, apply the pattern rule below and generate the object files.
-# once the object files exist, run a command similar to the one below:
-# clang -Wall -Wextra -Iinclude -g -c src/main.c -o src/main.o
-# The $@, $^, and $< are automatic variables, referring to the target, all prerequisites, and the first prerequisite, in that order.
+#-------------------------------------------------------------
+# CLEAN
+#-------------------------------------------------------------
+clean:
+ifeq ($(IS_WINDOWS),1)
+	PowerShell -Command "Remove-Item -Recurse -Force build, bin"
+else
+	rm -rf build bin
+endif
